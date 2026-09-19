@@ -1,0 +1,638 @@
+\documentclass[12pt,a4paper]{ctexart}
+
+\usepackage[a4paper,margin=2.4cm]{geometry}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage[hidelinks]{hyperref}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+
+\definecolor{codegreen}{rgb}{0.0,0.45,0.25}
+\definecolor{codegray}{rgb}{0.45,0.45,0.45}
+\definecolor{codeblue}{rgb}{0.15,0.25,0.65}
+
+\lstset{
+    language=C,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{codeblue},
+    commentstyle=\color{codegreen},
+    stringstyle=\color{codegray},
+    showstringspaces=false,
+    breaklines=true,
+    frame=single,
+    rulecolor=\color{black!35},
+    numbers=left,
+    numberstyle=\tiny\color{codegray},
+    numbersep=6pt,
+    tabsize=4,
+    extendedchars=true,
+    keepspaces=true
+}
+
+\title{\textbf{FreeRTOS 新手入门教学}\\[0.3em]
+\large 从裸机思维到多任务实时系统}
+\author{嵌入式学习资料}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{为什么需要 RTOS}
+
+在没有操作系统时，我们通常写一个超级循环：
+
+\begin{lstlisting}
+int main(void)
+{
+    init_hardware();
+
+    while (1) {
+        read_sensor();
+        process_data();
+        update_display();
+        handle_communication();
+    }
+}
+\end{lstlisting}
+
+这种写法对小项目足够，但任务变复杂后会出现问题：
+
+\begin{itemize}
+    \item 某个函数执行时间过长，其他功能无法及时响应。
+    \item 通信、按键、显示、传感器之间互相等待。
+    \item 阻塞操作会导致整个系统停顿。
+    \item 实时性要求无法保证。
+\end{itemize}
+
+RTOS 把复杂系统拆成多个“任务”，由调度器决定哪个任务运行。FreeRTOS 是最常用的 MCU RTOS 之一，支持 STM32、ESP32、NXP、TI、Nordic 等平台。
+
+\section{核心概念}
+
+\subsection{任务}
+
+任务就是一个独立执行的函数。它有自己的栈空间、优先级和运行状态。
+
+\begin{lstlisting}
+void vMyTask(void *pvParameters)
+{
+    while (1) {
+        do_something();
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+\end{lstlisting}
+
+\subsection{调度器}
+
+调度器负责决定当前应该运行哪个任务。FreeRTOS 通常使用抢占式调度：
+
+\begin{itemize}
+    \item 高优先级任务就绪后，会抢占低优先级任务。
+    \item 相同优先级的任务可以时间片轮转运行。
+    \item 任务主动阻塞或延时时，调度器会切换到其他任务。
+\end{itemize}
+
+\subsection{Tick}
+
+Tick 是 FreeRTOS 的时间基准，通常由硬件定时器产生。
+
+\begin{lstlisting}
+#define configTICK_RATE_HZ 1000
+\end{lstlisting}
+
+如果 Tick 频率是 1000Hz，那么：
+
+\begin{itemize}
+    \item 1 个 Tick 等于 1ms。
+    \item \texttt{pdMS\_TO\_TICKS(100)} 会把 100ms 转换为 100 个 Tick。
+\end{itemize}
+
+\subsection{任务状态}
+
+FreeRTOS 任务通常有以下状态：
+
+\begin{itemize}
+    \item \textbf{运行态 Running}：任务正在使用 CPU。
+    \item \textbf{就绪态 Ready}：任务可以运行，但在等待 CPU。
+    \item \textbf{阻塞态 Blocked}：任务在等待延时、队列、信号量或事件。
+    \item \textbf{挂起态 Suspended}：任务被主动挂起，不参与调度。
+\end{itemize}
+
+任务通常从就绪态进入运行态；调用延时或等待 API 时进入阻塞态；等待完成后回到就绪态。
+
+\section{创建你的第一个任务}
+
+FreeRTOS 创建任务最常用的 API 是：
+
+\begin{lstlisting}
+BaseType_t xTaskCreate(
+    TaskFunction_t pxTaskCode,
+    const char *pcName,
+    configSTACK_DEPTH_TYPE usStackDepth,
+    void *pvParameters,
+    UBaseType_t uxPriority,
+    TaskHandle_t *pxCreatedTask
+);
+\end{lstlisting}
+
+参数含义：
+
+\begin{itemize}
+    \item \texttt{pxTaskCode}：任务函数。
+    \item \texttt{pcName}：任务名称，便于调试。
+    \item \texttt{usStackDepth}：栈深度，注意单位不是字节。
+    \item \texttt{pvParameters}：传给任务的参数。
+    \item \texttt{uxPriority}：任务优先级，数值越大优先级越高。
+    \item \texttt{pxCreatedTask}：任务句柄，可传 \texttt{NULL}。
+\end{itemize}
+
+完整示例：
+
+\begin{lstlisting}
+#include "FreeRTOS.h"
+#include "task.h"
+
+void vTask1(void *pvParameters)
+{
+    while (1) {
+        printf("Task 1 running\n");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+void vTask2(void *pvParameters)
+{
+    while (1) {
+        printf("Task 2 running\n");
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+}
+
+int main(void)
+{
+    xTaskCreate(vTask1, "Task1", 2048, NULL, 1, NULL);
+    xTaskCreate(vTask2, "Task2", 2048, NULL, 1, NULL);
+
+    vTaskStartScheduler();
+
+    for (;;) {
+        // The scheduler should never return here.
+    }
+}
+\end{lstlisting}
+
+\section{延时与周期任务}
+
+\subsection{相对延时}
+
+\texttt{vTaskDelay} 会让当前任务阻塞指定时间：
+
+\begin{lstlisting}
+vTaskDelay(pdMS_TO_TICKS(500));
+\end{lstlisting}
+
+它表示从调用时刻开始，再延时 500ms。
+
+\subsection{绝对周期延时}
+
+如果希望任务保持固定周期，应使用：
+
+\begin{lstlisting}
+void vPeriodicTask(void *pvParameters)
+{
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+
+    while (1) {
+        do_periodic_work();
+
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(100));
+    }
+}
+\end{lstlisting}
+
+这种写法能减少任务执行时间造成的周期漂移。
+
+\section{队列}
+
+队列用于在任务之间传递数据。
+
+\subsection{创建队列}
+
+\begin{lstlisting}
+QueueHandle_t xQueue = xQueueCreate(5, sizeof(int));
+\end{lstlisting}
+
+这里创建了一个最多存放 5 个 \texttt{int} 的队列。
+
+\subsection{发送和接收}
+
+\begin{lstlisting}
+void vProducer(void *pvParameters)
+{
+    int value = 0;
+
+    while (1) {
+        xQueueSend(xQueue, &value, portMAX_DELAY);
+        value++;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+void vConsumer(void *pvParameters)
+{
+    int value;
+
+    while (1) {
+        if (xQueueReceive(xQueue, &value, portMAX_DELAY) == pdTRUE) {
+            process_value(value);
+        }
+    }
+}
+\end{lstlisting}
+
+队列的行为：
+
+\begin{itemize}
+    \item 队列满时，发送任务会阻塞。
+    \item 队列空时，接收任务会阻塞。
+    \item 超时参数 \texttt{portMAX\_DELAY} 表示无限等待。
+\end{itemize}
+
+队列适合传递数据，但相对任务通知和信号量开销稍大。
+
+\section{信号量与互斥量}
+
+\subsection{二值信号量}
+
+二值信号量常用于“等待一个事件发生”。
+
+\begin{lstlisting}
+SemaphoreHandle_t xSem = xSemaphoreCreateBinary();
+
+void vWaitingTask(void *pvParameters)
+{
+    while (1) {
+        if (xSemaphoreTake(xSem, portMAX_DELAY) == pdTRUE) {
+            handle_event();
+        }
+    }
+}
+
+void vSignalingTask(void *pvParameters)
+{
+    while (1) {
+        do_work();
+        xSemaphoreGive(xSem);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+\end{lstlisting}
+
+\subsection{计数信号量}
+
+计数信号量可以表示多个资源或多次事件：
+
+\begin{lstlisting}
+SemaphoreHandle_t xCountingSem =
+    xSemaphoreCreateCounting(3, 0);
+\end{lstlisting}
+
+参数分别表示最大计数和初始计数。
+
+\subsection{互斥量}
+
+互斥量用于保护共享资源。它是带所有权的特殊二值信号量。
+
+\begin{lstlisting}
+SemaphoreHandle_t xMutex = xSemaphoreCreateMutex();
+
+void vAccessResource(void *pvParameters)
+{
+    while (1) {
+        if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE) {
+            access_shared_resource();
+            xSemaphoreGive(xMutex);
+        }
+    }
+}
+\end{lstlisting}
+
+互斥量的重要规则：
+
+\begin{itemize}
+    \item 谁 Take，谁 Give。
+    \item 支持优先级继承。
+    \item 不能在中断服务程序中使用。
+    \item 同一个任务多次获取同一互斥量时，应使用递归互斥量。
+\end{itemize}
+
+\section{事件组}
+
+事件组可以一次等待多个事件。
+
+\begin{lstlisting}
+#define BIT_TEMP_READY (1 << 0)
+#define BIT_WIFI_READY (1 << 1)
+
+EventGroupHandle_t xEvents = xEventGroupCreate();
+
+void vSensorTask(void *pvParameters)
+{
+    read_temperature();
+    xEventGroupSetBits(xEvents, BIT_TEMP_READY);
+}
+
+void vWiFiTask(void *pvParameters)
+{
+    connect_wifi();
+    xEventGroupSetBits(xEvents, BIT_WIFI_READY);
+}
+
+void vMainTask(void *pvParameters)
+{
+    xEventGroupWaitBits(
+        xEvents,
+        BIT_TEMP_READY | BIT_WIFI_READY,
+        pdTRUE,
+        pdTRUE,
+        portMAX_DELAY
+    );
+
+    start_application();
+}
+\end{lstlisting}
+
+这里 \texttt{pdTRUE} 表示等待到所有事件位都被置位，并在等待成功后清除这些事件位。
+
+\section{任务通知}
+
+任务通知是轻量级的任务间通信方式。相比队列和信号量，它通常更快，占用的 RAM 更少。
+
+\begin{lstlisting}
+void vProducerTask(void *pvParameters)
+{
+    while (1) {
+        do_something();
+        xTaskNotifyGive(xConsumerHandle);
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+void vConsumerTask(void *pvParameters)
+{
+    while (1) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        handle_notification();
+    }
+}
+\end{lstlisting}
+
+任务通知的限制：
+
+\begin{itemize}
+    \item 通知对象只能是一个任务。
+    \item 一个任务只有一个通知值。
+    \item 适合简单事件通知，不适合复杂的多数据流。
+\end{itemize}
+
+\section{软件定时器}
+
+软件定时器由 FreeRTOS 的定时器服务任务执行，因此回调函数不能长时间阻塞。
+
+\begin{lstlisting}
+void vTimerCallback(TimerHandle_t xTimer)
+{
+    toggle_led();
+}
+
+TimerHandle_t xTimer = xTimerCreate(
+    "Blink",
+    pdMS_TO_TICKS(1000),
+    pdTRUE,
+    NULL,
+    vTimerCallback
+);
+
+xTimerStart(xTimer, 0);
+\end{lstlisting}
+
+参数含义：
+
+\begin{itemize}
+    \item 定时器名称。
+    \item 周期时间。
+    \item 是否自动重载。
+    \item 定时器 ID。
+    \item 回调函数。
+\end{itemize}
+
+\section{中断与 FreeRTOS}
+
+中断里调用 FreeRTOS API 时，必须使用带 \texttt{FromISR} 的接口。
+
+\begin{lstlisting}
+void IRAM_ATTR gpio_isr_handler(void *arg)
+{
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    xSemaphoreGiveFromISR(xSem, &xHigherPriorityTaskWoken);
+
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+\end{lstlisting}
+
+重要规则：
+
+\begin{itemize}
+    \item 不要在中断中调用 \texttt{xSemaphoreGive}，应调用 \texttt{xSemaphoreGiveFromISR}。
+    \item 不要在中断中调用互斥量 Take/Give。
+    \item \texttt{portYIELD\_FROM\_ISR} 用于判断是否需要在退出中断后立即切换任务。
+    \item 中断优先级必须正确配置，尤其是 Cortex-M 上使用 FreeRTOS 时。
+\end{itemize}
+
+\section{常用配置项}
+
+FreeRTOS 的行为主要由 \texttt{FreeRTOSConfig.h} 控制。
+
+\begin{lstlisting}
+#define configUSE_PREEMPTION            1
+#define configTICK_RATE_HZ              1000
+#define configMAX_PRIORITIES            8
+#define configMINIMAL_STACK_SIZE        128
+#define configTOTAL_HEAP_SIZE           (32 * 1024)
+#define configUSE_IDLE_HOOK             0
+#define configUSE_TICK_HOOK             0
+#define configUSE_MUTEXES               1
+#define configUSE_RECURSIVE_MUTEXES     1
+#define configUSE_COUNTING_SEMAPHORES   1
+#define configSUPPORT_STATIC_ALLOCATION 1
+#define configSUPPORT_DYNAMIC_ALLOCATION 1
+\end{lstlisting}
+
+重点配置：
+
+\begin{itemize}
+    \item \texttt{configUSE\_PREEMPTION}：是否使用抢占式调度。
+    \item \texttt{configTICK\_RATE\_HZ}：Tick 频率。
+    \item \texttt{configMAX\_PRIORITIES}：最大优先级数量。
+    \item \texttt{configTOTAL\_HEAP\_SIZE}：FreeRTOS 动态内存池大小。
+\end{itemize}
+
+\section{内存管理}
+
+FreeRTOS 提供多种堆实现：
+
+\begin{itemize}
+    \item \texttt{heap\_1}：只分配，不释放，适合永远不删除对象的系统。
+    \item \texttt{heap\_2}：可以释放，但不合并相邻空闲块。
+    \item \texttt{heap\_3}：使用标准库 \texttt{malloc/free}。
+    \item \texttt{heap\_4}：支持释放并合并空闲块，是常见选择。
+    \item \texttt{heap\_5}：允许跨多个不连续内存区域。
+\end{itemize}
+
+动态创建：
+
+\begin{lstlisting}
+xTaskCreate(...);
+xQueueCreate(...);
+xSemaphoreCreateBinary();
+\end{lstlisting}
+
+静态创建：
+
+\begin{lstlisting}
+xTaskCreateStatic(...);
+xQueueCreateStatic(...);
+xSemaphoreCreateBinaryStatic(...);
+\end{lstlisting}
+
+静态创建不依赖动态堆，适合对内存使用要求非常严格的系统。
+
+\section{常见问题与排查}
+
+\subsection{栈溢出}
+
+任务栈过小时会发生栈溢出，可能表现为随机复位或数据被破坏。
+
+排查方法：
+
+\begin{itemize}
+    \item 增大任务栈。
+    \item 使用 \texttt{uxTaskGetStackHighWaterMark} 查看剩余栈。
+    \item 开启栈溢出检测钩子。
+\end{itemize}
+
+\subsection{优先级反转}
+
+高优先级任务等待低优先级任务持有的互斥量，而低优先级任务又被中优先级任务抢占。
+
+FreeRTOS 的互斥量支持优先级继承，应优先使用互斥量而不是普通二值信号量来保护共享资源。
+
+\subsection{死锁}
+
+两个任务互相等待对方释放资源，导致谁也无法继续。
+
+解决方法：
+
+\begin{itemize}
+    \item 固定加锁顺序。
+    \item 使用超时等待。
+    \item 减少嵌套锁。
+\end{itemize}
+
+\subsection{中断中调用错误 API}
+
+在中断里调用非 \texttt{FromISR} API 会导致未定义行为。中断中应使用：
+
+\begin{lstlisting}
+xQueueSendFromISR(...);
+xSemaphoreGiveFromISR(...);
+xTaskNotifyFromISR(...);
+\end{lstlisting}
+
+\subsection{内存碎片}
+
+频繁创建和删除不同大小的对象可能产生内存碎片。建议：
+
+\begin{itemize}
+    \item 使用 \texttt{heap\_4}。
+    \item 尽量在系统启动阶段创建对象。
+    \item 对关键对象使用静态创建。
+\end{itemize}
+
+\section{新手学习路线}
+
+\subsection{先打好基础}
+
+\begin{itemize}
+    \item C 语言：指针、结构体、函数指针、位运算、环形缓冲区。
+    \item 单片机外设：GPIO、UART、SPI、I2C、定时器、ADC、DMA。
+    \item 中断：中断优先级、ISR、清除中断标志。
+\end{itemize}
+
+\subsection{再做小实验}
+
+按顺序练习：
+
+\begin{enumerate}
+    \item 创建两个任务，用不同频率打印信息。
+    \item 用一个任务读取按键，另一个任务控制 LED。
+    \item 使用队列在任务之间传递传感器数据。
+    \item 使用二值信号量处理外部中断事件。
+    \item 使用互斥量保护共享变量。
+    \item 使用事件组等待多个条件。
+    \item 使用软件定时器周期性执行任务。
+\end{enumerate}
+
+\subsection{完成一个完整项目}
+
+推荐做：
+
+\begin{itemize}
+    \item 多传感器采集与显示设备。
+    \item WiFi 或 BLE 物联网节点。
+    \item 带 OTA 升级的低功耗设备。
+    \item 电机或舵机控制设备。
+    \item CAN 总线工业节点。
+\end{itemize}
+
+完整项目比多个零散 demo 更能证明能力。
+
+\section{学习检查清单}
+
+完成入门学习后，你应该能回答：
+
+\begin{itemize}
+    \item FreeRTOS 的任务有哪几种状态？
+    \item \texttt{vTaskDelay} 和 \texttt{vTaskDelayUntil} 有什么区别？
+    \item 队列、二值信号量、计数信号量、互斥量分别适合什么场景？
+    \item 任务通知和队列相比有什么优缺点？
+    \item 为什么中断里要使用 \texttt{FromISR} API？
+    \item 什么是优先级反转？如何避免？
+    \item 什么是死锁？如何避免？
+    \item 如何判断任务栈是否足够？
+    \item \texttt{heap\_1} 到 \texttt{heap\_5} 有什么区别？
+\end{itemize}
+
+\section{总结}
+
+FreeRTOS 学习的重点不是背 API，而是建立多任务系统思维：
+
+\begin{itemize}
+    \item 如何把功能拆成任务。
+    \item 如何设置优先级。
+    \item 如何选择任务间通信方式。
+    \item 如何保证共享资源安全。
+    \item 如何调试实时性问题。
+\end{itemize}
+
+建议先在一款开发板上完成一个完整项目，再逐步深入源码、调度器和性能分析工具。
+
+\end{document}
